@@ -1924,12 +1924,34 @@ function showApp(){
   document.getElementById('appRoot').style.display = 'flex';
 }
 
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+// Render gibi ücretsiz hosting'lerde hareketsiz kalan instance uykuya dalar;
+// uyanırken ilk istek(ler) kısa süreliğine hata dönebilir. Sert bir hata
+// göstermeden önce birkaç kez sessizce tekrar deneyip gerçek bir kesintiyle
+// (uzun süren cold start) geçici bir aksaklığı birbirinden ayırıyoruz.
+async function fetchJsonWithRetry(url, options, attempts, delayMs){
+  let lastErr;
+  for(let i=0; i<attempts; i++){
+    try{
+      const res = await fetch(url, options);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return await res.json();
+    }catch(e){
+      lastErr = e;
+      if(i < attempts-1) await sleep(delayMs);
+    }
+  }
+  throw lastErr;
+}
+
 async function boot(){
   document.getElementById('content').innerHTML = '<div class="empty">Yükleniyor…</div>';
   setupBackupControls();
   try{
-    const res = await fetch('/api/session', {credentials:'same-origin'});
-    const body = await res.json();
+    // İlk birkaç deneme hızlı art arda (kısa ağ takılmaları için), sonrakiler
+    // yavaşlayarak devam eder (sunucu uykudan uyanıyor olabilir, ~50sn sürebilir).
+    const body = await fetchJsonWithRetry('/api/session', {credentials:'same-origin'}, 10, 3000);
     if(body.authenticated){
       showApp();
       await loadData();
@@ -1939,7 +1961,7 @@ async function boot(){
     }
   }catch(e){
     console.error(e);
-    showLoginScreen('Sunucuya bağlanılamadı.');
+    showLoginScreen('Sunucuya bağlanılamadı. Sayfayı yenilemeyi dene.');
   }
 }
 
@@ -1950,21 +1972,29 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   errEl.textContent = '';
   submitBtn.disabled = true;
   submitBtn.textContent = 'Kontrol ediliyor…';
+  const loginOptions = {
+    method:'POST',
+    credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({password: document.getElementById('loginPassword').value})
+  };
   try{
-    const res = await fetch('/api/login', {
-      method:'POST',
-      credentials:'same-origin',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({password: document.getElementById('loginPassword').value})
-    });
-    const body = await res.json().catch(()=>({}));
-    if(res.ok){
+    let res, ok=false, isJson=false;
+    // Sunucu henüz uyanıyor olabilir (bkz. boot()) — bir kaç kez sessizce dene.
+    for(let i=0; i<3; i++){
+      res = await fetch('/api/login', loginOptions);
+      isJson = (res.headers.get('content-type')||'').includes('application/json');
+      if(res.ok || isJson){ ok = res.ok; break; } // gerçek bir cevap (başarı ya da "şifre yanlış") aldık
+      if(i<2) await sleep(2000);
+    }
+    const body = isJson ? await res.json().catch(()=>({})) : {};
+    if(ok){
       showApp();
       document.getElementById('content').innerHTML = '<div class="empty">Yükleniyor…</div>';
       await loadData();
       render();
     } else {
-      errEl.textContent = body.error || 'Giriş başarısız.';
+      errEl.textContent = body.error || 'Sunucuya bağlanılamadı, tekrar dener misin?';
     }
   }catch(e){
     errEl.textContent = 'Sunucuya bağlanılamadı.';
