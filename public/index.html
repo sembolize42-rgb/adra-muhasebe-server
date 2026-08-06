@@ -2,6 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Adra Muhasebe</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
@@ -28,6 +29,7 @@
     -webkit-font-smoothing:antialiased;
   }
   .app{display:flex;min-height:100vh;}
+  .app.hidden{display:none;}
 
   /* SIDEBAR */
   .sidebar{
@@ -224,6 +226,71 @@
 
   ::placeholder{color:#A9AFBB;}
 
+  /* Yatayda taşan tabloları kendi kutusu içinde kaydırılabilir yapar (mobilde
+     sütunları sıkıştırmak yerine parmakla sağa/sola kaydırılır). */
+  .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+
+  /* MOBIL TOP BAR — sadece küçük ekranlarda görünür, sidebar'ı açıp kapatan
+     hamburger düğmesini içerir. */
+  .mobile-topbar{display:none;}
+  .sidebar-backdrop{display:none;}
+
+  @media (max-width:860px){
+    main{padding:20px 16px 40px 16px;max-width:100%;}
+    .sheet-head{flex-direction:column;align-items:flex-start;gap:10px;}
+    .titleblock{min-width:0;width:100%;}
+    .cards{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;}
+    .card{padding:12px 14px;}
+    .card .v{font-size:18px;}
+    section.panel{padding:16px 14px;}
+    form.row-form{gap:8px;}
+    .field input,.field select{min-width:0;width:100%;font-size:16px;}
+    .field{flex:1 1 140px;}
+    .note-form .field input{font-size:16px;}
+
+    .mobile-topbar{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      position:sticky;
+      top:0;
+      z-index:30;
+      background:var(--ink);
+      color:var(--paper);
+      padding:14px 16px;
+    }
+    .mobile-topbar .brand-title{font-size:16px;font-weight:700;}
+    .hamburger{
+      background:none;
+      border:1px solid rgba(255,255,255,0.25);
+      color:var(--paper);
+      width:36px;height:36px;
+      border-radius:var(--radius);
+      cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      flex-shrink:0;
+    }
+    .app{display:block;}
+    main{max-width:100%;}
+    .sidebar{
+      position:fixed;
+      top:0; left:0; bottom:0;
+      width:260px;
+      z-index:50;
+      transform:translateX(-100%);
+      transition:transform 0.2s ease;
+      overflow-y:auto;
+    }
+    .sidebar.open{transform:translateX(0);}
+    .sidebar-backdrop.open{
+      display:block;
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,0.4);
+      z-index:40;
+    }
+  }
+
   /* LOGIN */
   .login-screen{
     min-height:100vh;
@@ -263,8 +330,15 @@
   </form>
 </div>
 
-<div class="app" id="appRoot" style="display:none;">
-  <aside class="sidebar">
+<div class="app hidden" id="appRoot">
+  <div class="mobile-topbar">
+    <button class="hamburger" id="hamburgerBtn" aria-label="Menüyü aç/kapat">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <div class="brand-title">Adra Muhasebe</div>
+  </div>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+  <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="brand-mark">Ölçek 1:1</div>
       <div class="brand-title">Adra Muhasebe</div>
@@ -407,7 +481,7 @@ function renderNav(){
     const b = document.createElement('button');
     b.className = 'navbtn' + (current===t.id ? ' active':'');
     b.innerHTML = ICONS[t.id] + '<span>'+t.label+'</span>';
-    b.onclick = ()=>{ current=t.id; editingTxId=null; editingCariId=null; editingChargeId=null; recordingMaasId=null; editingMaasId=null; editingTransferId=null; editingBankId=null; editingCekId=null; editingLoanId=null; render(); };
+    b.onclick = ()=>{ current=t.id; editingTxId=null; editingCariId=null; editingChargeId=null; recordingMaasId=null; editingMaasId=null; editingTransferId=null; editingBankId=null; editingCekId=null; editingLoanId=null; closeSidebar(); render(); };
     nav.appendChild(b);
   });
 }
@@ -523,14 +597,14 @@ function viewKasa(){
       const archivedBanks = state.bankAccounts.filter(b=>b.archived);
       let html = '';
       html += activeBanks.length===0 ? emptyState('Henüz banka hesabı yok','Yukarıdan bir banka hesabı ekleyebilirsin, Gelir/Gider ve transferlerde seçenek olarak çıkar.') : `
-      <table><thead><tr><th>Hesap Adı</th><th style="text-align:right">Bakiye</th><th></th></tr></thead>
+      <div class="table-scroll"><table><thead><tr><th>Hesap Adı</th><th style="text-align:right">Bakiye</th><th></th></tr></thead>
       <tbody>${activeBanks.map(b=>{
         const bal = accountBalance(b.id);
         if(b.id===editingBankId){
           return `<tr class="edit-row"><td><input type="text" class="eb-name" value="${esc(b.name)}"></td><td></td><td style="white-space:nowrap;"><button class="btn small" data-save-bank="${b.id}">Kaydet</button> <button class="btn small ghost" data-cancel-bank="${b.id}">İptal</button></td></tr>`;
         }
         return `<tr><td>${esc(b.name)}</td><td class="num">${fmt(bal)} ₺</td><td><button class="editbtn" data-edit-bank="${b.id}" title="Yeniden adlandır">✎</button><button class="del" data-del-bank="${b.id}" title="${Math.abs(bal)<0.005?'Sil':'Silmek için bakiye sıfır olmalı'}">✕</button></td></tr>`;
-      }).join('')}</tbody></table>`;
+      }).join('')}</tbody></table></div>`;
       if(archivedBanks.length){
         html += `<div style="margin-top:16px;border-top:1px dashed var(--line);padding-top:12px;">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:8px;">Arşivlenmiş Hesaplar</div>
@@ -553,7 +627,7 @@ function viewKasa(){
     </form>
     <div style="font-size:11.5px;color:var(--ink-soft);margin:-8px 0 16px 0;">Örneğin Banka-1'den 40.000₺ nakit çektiysen, kaynak "Banka-1", hedef "Nakit" seçip tutarı gir. Toplam kasa bakiyesi değişmez, sadece hesaplar arası dağılım güncellenir.</div>
     ${transfers.length===0 ? emptyState('Henüz transfer kaydı yok','Nakit ve banka arasında para hareketi olduğunda burada takip edebilirsin.') : `
-    <table><thead><tr><th>Tarih</th><th>Kaynak</th><th>Hedef</th><th>Açıklama</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
+    <div class="table-scroll"><table><thead><tr><th>Tarih</th><th>Kaynak</th><th>Hedef</th><th>Açıklama</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
     <tbody>${transfers.map(x=>{
       if(x.id===editingTransferId){
         return `<tr class="edit-row">
@@ -566,7 +640,7 @@ function viewKasa(){
         </tr>`;
       }
       return `<tr><td>${fmtDate(x.date)}</td><td>${accLabel(x.from)}</td><td>${accLabel(x.to)}</td><td>${esc(x.description)||'-'}</td><td class="num">${fmt(x.amount)} ₺</td><td><button class="editbtn" data-edit-transfer="${x.id}" title="Düzenle">✎</button><button class="del" data-del-transfer="${x.id}">✕</button></td></tr>`;
-    }).join('')}</tbody></table>`}
+    }).join('')}</tbody></table></div>`}
   </section>
   <section class="panel">
     <h2>Excel Dökümü</h2>
@@ -580,8 +654,8 @@ function viewKasa(){
   <section class="panel">
     <h2>Son Hareketler</h2>
     ${son.length===0 ? emptyState('Henüz hareket yok','Gelir veya gider ekledikçe burada listelenecek.') : `
-    <table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Hesap</th><th>Proje</th><th style="text-align:right">Tutar</th></tr></thead>
-    <tbody>${son.map(x=>`<tr><td>${fmtDate(x.date)}</td><td>${esc(x.description)||'-'}</td><td>${accLabel(x.account)}</td><td>${esc(x.project)||'-'}</td><td class="num ${x.type==='gelir'?'pos':'neg'}">${x.type==='gelir'?'+':'-'}${fmt(x.amount)} ₺</td></tr>`).join('')}</tbody></table>`}
+    <div class="table-scroll"><table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Hesap</th><th>Proje</th><th style="text-align:right">Tutar</th></tr></thead>
+    <tbody>${son.map(x=>`<tr><td>${fmtDate(x.date)}</td><td>${esc(x.description)||'-'}</td><td>${accLabel(x.account)}</td><td>${esc(x.project)||'-'}</td><td class="num ${x.type==='gelir'?'pos':'neg'}">${x.type==='gelir'?'+':'-'}${fmt(x.amount)} ₺</td></tr>`).join('')}</tbody></table></div>`}
   </section>`;
 }
 
@@ -721,7 +795,7 @@ function viewGider(type){
     <datalist id="projectList">${state.projects.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>
     ${relevantCustomers.length===0 ? `<div style="font-size:11.5px;color:var(--ink-soft);margin:-8px 0 16px 0;">Cari seçeneklerinin görünmesi için önce "Cari Hesap" sekmesinden ${type==='gelir'?'müşteri':'tedarikçi'} ekle.</div>` : ''}
     ${list.length===0 ? emptyState(`Henüz ${label.toLowerCase()} yok`, `İlk ${label.toLowerCase()} kaydını yukarıdan ekleyebilirsin.`) : `
-    <table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Kategori</th><th>Proje</th><th>Hesap</th><th>Cari</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
+    <div class="table-scroll"><table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Kategori</th><th>Proje</th><th>Hesap</th><th>Cari</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
     <tbody>${list.map(x=>{
       if(x.id===editingTxId){
         return `<tr class="edit-row">
@@ -739,7 +813,7 @@ function viewGider(type){
       return `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.description)}</td><td>${esc(x.category)||'-'}</td><td>${esc(x.project)||'-'}</td><td>${accLabel(x.account)}</td><td>${custName?esc(custName):'-'}</td><td class="num ${type==='gelir'?'pos':'neg'}">${fmt(x.amount)} ₺</td><td><button class="editbtn" data-edit-tx="${x.id}" title="Düzenle">✎</button><button class="del" data-del-tx="${x.id}">✕</button></td></tr>`;
     }).join('')}</tbody>
     <tfoot><tr><td colspan="${colCount-1}" style="text-align:right;font-weight:700;padding:10px;">Toplam</td><td class="num" style="font-weight:700;">${fmt(totalSum)} ₺</td><td></td></tr></tfoot>
-    </table>`}
+    </table></div>`}
   </section>`;
 }
 
@@ -792,7 +866,7 @@ function viewCekler(){
     </form>
     <div style="font-size:11.5px;color:var(--ink-soft);margin:-8px 0 16px 0;">Vade tarihi geldiğinde durumu "Tahsil Edildi" (alınan çekler) veya "Ödendi" (verilen çekler) yaptığında, tutar seçtiğin hesaba otomatik işlenir. Durumu geri alırsan kasa hareketi de otomatik geri alınır.</div>
     ${list.length===0 ? emptyState('Henüz çek kaydı yok','Alınan veya verilen bir çeki yukarıdan ekleyebilirsin.') : `
-    <table><thead><tr><th>Alınma</th><th>Vade</th><th>Yön</th><th>Banka</th><th>Açıklama</th><th>Hesap</th><th style="text-align:right">Tutar</th><th>Durum</th><th></th></tr></thead>
+    <div class="table-scroll"><table><thead><tr><th>Alınma</th><th>Vade</th><th>Yön</th><th>Banka</th><th>Açıklama</th><th>Hesap</th><th style="text-align:right">Tutar</th><th>Durum</th><th></th></tr></thead>
     <tbody>${list.map(x=>{
       if(x.id===editingCekId){
         return `<tr class="edit-row">
@@ -818,7 +892,7 @@ function viewCekler(){
       <td><select class="status-select" data-status-cek="${x.id}">${checkStatusOptions(x.direction, x.status)}</select></td>
       <td><button class="editbtn" data-edit-cek="${x.id}" title="Düzenle">✎</button><button class="del" data-del-cek="${x.id}">✕</button></td>
     </tr>`;
-    }).join('')}</tbody></table>`}
+    }).join('')}</tbody></table></div>`}
   </section>`;
 }
 
@@ -847,7 +921,7 @@ function viewMaaslar(){
           <button class="btn small" type="submit">Ekle (kasadan düş)</button>
         </form>
         ${payments.length===0 ? emptyState('Bu ortağın çekiş kaydı yok','Yukarıdan bir çekiş ekleyebilirsin.') : `
-        <table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Hesap</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
+        <div class="table-scroll"><table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Hesap</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
         <tbody>${payments.sort((a,b)=>b.date.localeCompare(a.date)).map(x=>{
           let mainRow;
           if(x.id===editingMaasId){
@@ -882,7 +956,7 @@ function viewMaaslar(){
             noteRow = `<tr class="note-row"><td colspan="5"><button class="note-add" data-mark-record="${x.id}">+ Kayda alındığını işaretle</button></td></tr>`;
           }
           return mainRow + noteRow;
-        }).join('')}</tbody></table>`}
+        }).join('')}</tbody></table></div>`}
       </div>` : ''}
     </div>`;
   }).join('');
@@ -936,7 +1010,7 @@ function viewCari(){
         </form>
         <div style="font-size:11px;color:var(--ink-soft);margin:-8px 0 14px 0;">"Hesap" seçimi sadece ${settleLabel.split(' ')[0]} girişinde kasaya işlenirken kullanılır.</div>
         ${entries.length===0 ? emptyState('Bu caride kayıt yok', isTedarikci ? 'Yukarıdan borç veya ödeme ekleyebilirsin.' : 'Yukarıdan borç veya tahsilat ekleyebilirsin.') : `
-        <table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Tür</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
+        <div class="table-scroll"><table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Tür</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
         <tbody>${entries.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{
           const eSettle = e.type==='tahsilat'||e.type==='odeme';
           if(e.id===editingCariId){
@@ -955,7 +1029,7 @@ function viewCari(){
           <td class="num ${eSettle?(isTedarikci?'neg':'pos'):(isTedarikci?'pos':'neg')}">${fmt(e.amount)} ₺</td>
           <td><button class="editbtn" data-edit-cari="${e.id}" title="Düzenle">✎</button><button class="del" data-del-cari="${e.id}">✕</button></td>
         </tr>`;
-        }).join('')}</tbody></table>`}
+        }).join('')}</tbody></table></div>`}
       </div>` : ''}
     </div>`;
   }).join('');
@@ -1004,8 +1078,8 @@ function viewProjeler(){
           <button class="btn small" type="submit">Ekle</button>
         </form>
         ${costs.length===0 ? emptyState('Bu projede maliyet kaydı yok','Yukarıdan proje maliyeti ekleyebilirsin.') : `
-        <table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Kategori</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
-        <tbody>${costs.sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`<tr><td>${fmtDate(c.date)}</td><td>${esc(c.description)}</td><td>${esc(c.category)||'-'}</td><td class="num neg">${fmt(c.amount)} ₺</td><td><button class="del" data-del-cost="${c.id}">✕</button></td></tr>`).join('')}</tbody></table>`}
+        <div class="table-scroll"><table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Kategori</th><th style="text-align:right">Tutar</th><th></th></tr></thead>
+        <tbody>${costs.sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`<tr><td>${fmtDate(c.date)}</td><td>${esc(c.description)}</td><td>${esc(c.category)||'-'}</td><td class="num neg">${fmt(c.amount)} ₺</td><td><button class="del" data-del-cost="${c.id}">✕</button></td></tr>`).join('')}</tbody></table></div>`}
       </div>` : ''}
     </div>`;
   }).join('');
@@ -1048,7 +1122,7 @@ function viewKredi(){
           <button class="btn small" type="submit">Ekle</button>
         </form>
         ${charges.length===0 ? emptyState('Bu kartta harcama yok','Yukarıdan harcama ekleyebilirsin.') : `
-        <table><thead><tr><th>Tarih</th><th>Açıklama</th><th style="text-align:right">Tutar</th><th>Durum</th><th></th></tr></thead>
+        <div class="table-scroll"><table><thead><tr><th>Tarih</th><th>Açıklama</th><th style="text-align:right">Tutar</th><th>Durum</th><th></th></tr></thead>
         <tbody>${charges.sort((a,b)=>b.date.localeCompare(a.date)).map(c=>{
           if(c.id===editingChargeId){
             return `<tr class="edit-row">
@@ -1066,7 +1140,7 @@ function viewKredi(){
           <td>${c.status==='odendi' ? '<span class="tag odendi">Ödendi</span>' : `<button class="btn small" data-pay-charge="${c.id}">Öde (kasadan düş)</button>`}</td>
           <td><button class="editbtn" data-edit-charge="${c.id}" title="Düzenle">✎</button><button class="del" data-del-charge="${c.id}">✕</button></td>
         </tr>`;
-        }).join('')}</tbody></table>`}
+        }).join('')}</tbody></table></div>`}
         <div style="border-top:1px dashed var(--line);margin-top:16px;padding-top:14px;">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);margin-bottom:8px;">Genel Ödeme (Ekstre / Toplu Ödeme)</div>
           <form class="row-form" data-form="odeme" data-card-id="${k.id}" style="border-bottom:none;padding-bottom:0;margin-bottom:0;">
@@ -1137,7 +1211,7 @@ function viewBorclar(){
           <button class="btn small" type="submit">Ödeme Ekle (kasadan düş)</button>
         </form>
         ${payments.length===0 ? emptyState('Bu borca ait ödeme yok','Yukarıdan bir ödeme ekleyebilirsin.') : `
-        <table><thead><tr><th>Tarih</th><th>Ödenen (${loan.currency})</th>${loan.currency!=='TRY'?'<th>Kur</th>':''}<th>TL Karşılığı</th><th>Hesap</th><th></th></tr></thead>
+        <div class="table-scroll"><table><thead><tr><th>Tarih</th><th>Ödenen (${loan.currency})</th>${loan.currency!=='TRY'?'<th>Kur</th>':''}<th>TL Karşılığı</th><th>Hesap</th><th></th></tr></thead>
         <tbody>${payments.sort((a,b)=>b.date.localeCompare(a.date)).map(p=>`<tr>
           <td>${fmtDate(p.date)}</td>
           <td class="num neg">${fmt(p.amountFx)} ${sym}</td>
@@ -1145,7 +1219,7 @@ function viewBorclar(){
           <td class="num neg">${fmt(p.amountTRY)} ₺</td>
           <td>${accLabel(p.account)}</td>
           <td><button class="del" data-del-loanpay="${p.id}">✕</button></td>
-        </tr>`).join('')}</tbody></table>`}
+        </tr>`).join('')}</tbody></table></div>`}
       </div>` : ''}
     </div>`;
   }).join('');
@@ -1911,7 +1985,7 @@ function setupBackupControls(){
 }
 
 function showLoginScreen(errorMsg){
-  document.getElementById('appRoot').style.display = 'none';
+  document.getElementById('appRoot').classList.add('hidden');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('loginError').textContent = errorMsg || '';
   const pwInput = document.getElementById('loginPassword');
@@ -1921,8 +1995,22 @@ function showLoginScreen(errorMsg){
 
 function showApp(){
   document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('appRoot').style.display = 'flex';
+  document.getElementById('appRoot').classList.remove('hidden');
 }
+
+function openSidebar(){
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebarBackdrop').classList.add('open');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarBackdrop').classList.remove('open');
+}
+document.getElementById('hamburgerBtn').addEventListener('click', ()=>{
+  const isOpen = document.getElementById('sidebar').classList.contains('open');
+  if(isOpen) closeSidebar(); else openSidebar();
+});
+document.getElementById('sidebarBackdrop').addEventListener('click', closeSidebar);
 
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
