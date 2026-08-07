@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 
 const pool = require('./db/pool');
+const { ensurePassword } = require('./db/ensurePassword');
 const { requireAuth } = require('./middleware/auth');
 const authRoutes = require('./routes/auth');
 const stateRoutes = require('./routes/state');
@@ -90,6 +91,10 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Sunucu hatası.' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Adra Muhasebe sunucusu http://localhost:${PORT} adresinde çalışıyor`);
-});
+ensurePassword()
+  .catch((err) => console.error('app_password ilk doldurma hatası (muhtemelen migrate henüz çalıştırılmadı):', err.message))
+  .finally(() => {
+    app.listen(PORT, () => {
+      console.log(`Adra Muhasebe sunucusu http://localhost:${PORT} adresinde çalışıyor`);
+    });
+  });

@@ -7,10 +7,20 @@ const { requireAuth, isAuthenticated } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Ortak şifrenin hash'i artık DB'de (app_password) — program içinden
+// değiştirilebilsin diye. .env'deki APP_PASSWORD_HASH sadece DB boşsa
+// (ilk kurulum / henüz migrate+seed olmamışsa) bir yedek/geçiş değeri.
+async function getPasswordHash() {
+  const result = await pool.query('SELECT hash FROM app_password WHERE id = TRUE');
+  if (result.rows.length) return result.rows[0].hash;
+  return process.env.APP_PASSWORD_HASH || null;
+}
+
 // Şifre denemesi için sıkı rate-limit: 15 dakikada IP başına en fazla 8
 // deneme. Başarılı girişler sayaca dahil edilmiyor (skipSuccessfulRequests)
 // ki normal kullanım hiç etkilenmesin, sadece art arda yanlış deneme
-// engellensin.
+// engellensin. Şifre değiştirme de aynı limiti kullanıyor (mevcut şifre
+// doğrulaması içerdiği için aynı brute-force riski var).
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 8,
@@ -22,9 +32,9 @@ const loginLimiter = rateLimit({
 
 router.post('/login', loginLimiter, async (req, res) => {
   const { password, wantToken, label } = req.body || {};
-  const hash = process.env.APP_PASSWORD_HASH;
+  const hash = await getPasswordHash();
   if (!hash) {
-    return res.status(500).json({ error: 'Sunucuda APP_PASSWORD_HASH ayarlı değil.' });
+    return res.status(500).json({ error: 'Sunucuda şifre ayarlı değil. Yöneticiye ulaşın.' });
   }
   if (!password || typeof password !== 'string') {
     return res.status(400).json({ error: 'Şifre gerekli.' });
@@ -70,6 +80,41 @@ router.post('/logout-token', requireAuth, async (req, res) => {
 
 router.get('/session', async (req, res) => {
   res.json({ authenticated: await isAuthenticated(req) });
+});
+
+// ---- Şifre değiştirme (program içinden) ----
+// Ortak şifreyi değiştirmek için mevcut şifre bilinmeli (sadece oturum
+// açık olması yetmez — çalınan bir cihaz/açık bırakılmış bir sekme
+// üzerinden başkasının şifreyi değiştirip herkesi dışarıda bırakmasını
+// engeller). Not: bu, MEVCUT masaüstü token'larını iptal ETMEZ — bir
+// cihaz kaybolduysa/çalındıysa ayrıca "Masaüstü Oturumlarını Sonlandır"
+// kullanılmalı.
+router.post('/admin/change-password', requireAuth, loginLimiter, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || typeof currentPassword !== 'string') {
+    return res.status(400).json({ error: 'Mevcut şifre gerekli.' });
+  }
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+    return res.status(400).json({ error: 'Yeni şifre en az 8 karakter olmalı.' });
+  }
+
+  const currentHash = await getPasswordHash();
+  if (!currentHash) {
+    return res.status(500).json({ error: 'Sunucuda şifre ayarlı değil.' });
+  }
+  const ok = await bcrypt.compare(currentPassword, currentHash);
+  if (!ok) {
+    return res.status(401).json({ error: 'Mevcut şifre yanlış.' });
+  }
+
+  const newHash = await bcrypt.hash(newPassword, 12);
+  await pool.query(
+    `INSERT INTO app_password (id, hash, updated_at) VALUES (TRUE, $1, now())
+     ON CONFLICT (id) DO UPDATE SET hash = EXCLUDED.hash, updated_at = now()`,
+    [newHash]
+  );
+
+  res.json({ ok: true });
 });
 
 // ---- Cihaz (masaüstü) token yönetimi ----

@@ -156,3 +156,15 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_used_at TIMESTAMPTZ
 );
+
+-- Ortak giriş şifresinin bcrypt hash'i. Önceden .env'deki APP_PASSWORD_HASH
+-- sabitti (değiştirmek için sunucuyu yeniden deploy etmek gerekiyordu);
+-- artık burada tutuluyor ki program içinden (Şifre Değiştir) anında
+-- güncellenebilsin, sunucu yeniden başlamadan. server.js açılışında bu
+-- tablo boşsa .env'deki APP_PASSWORD_HASH ile bir kerelik doldurulur
+-- (bkz. db/ensurePassword.js) — böylece mevcut kurulumlar kesintisiz geçer.
+CREATE TABLE IF NOT EXISTS app_password (
+  id          BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
+  hash        TEXT NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

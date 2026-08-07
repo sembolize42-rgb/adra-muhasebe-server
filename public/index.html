@@ -358,6 +358,17 @@
       <div id="importMsg" style="font-size:10px;margin-top:6px;color:#8FA6C9;"></div>
       <button class="sidebar-btn" id="logoutBtn" style="margin-top:14px;">Çıkış Yap</button>
       <div class="save-status" id="saveStatus"></div>
+
+      <button class="sidebar-btn" id="togglePasswordFormBtn" style="margin-top:14px;">Şifreyi Değiştir</button>
+      <form id="passwordForm" style="display:none;margin-top:8px;flex-direction:column;gap:6px;">
+        <input type="password" id="pwCurrent" placeholder="Mevcut şifre" autocomplete="current-password" required style="padding:6px 8px;border-radius:2px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:var(--paper);font-size:12px;font-family:inherit;">
+        <input type="password" id="pwNew" placeholder="Yeni şifre (en az 8 karakter)" autocomplete="new-password" required minlength="8" style="padding:6px 8px;border-radius:2px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:var(--paper);font-size:12px;font-family:inherit;">
+        <input type="password" id="pwConfirm" placeholder="Yeni şifre (tekrar)" autocomplete="new-password" required minlength="8" style="padding:6px 8px;border-radius:2px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:var(--paper);font-size:12px;font-family:inherit;">
+        <div class="login-error" id="pwError" style="margin:0;"></div>
+        <button class="sidebar-btn" type="submit" id="pwSubmitBtn">Kaydet</button>
+      </form>
+      <div class="save-status" id="pwStatus"></div>
+
       <button class="sidebar-btn" id="revokeDevicesBtn" style="margin-top:14px;border-color:#8A4A4A;color:#E8A79A;">Masaüstü Oturumlarını Sonlandır</button>
       <div class="save-status" id="deviceInfo"></div>
     </div>
@@ -514,6 +525,56 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 document.getElementById('logoutBtn').addEventListener('click', async ()=>{
   await fetch('/api/logout', {method:'POST', credentials:'same-origin'});
   showLoginScreen();
+});
+
+document.getElementById('togglePasswordFormBtn').addEventListener('click', ()=>{
+  const form = document.getElementById('passwordForm');
+  const showing = form.style.display !== 'none';
+  form.style.display = showing ? 'none' : 'flex';
+  document.getElementById('pwError').textContent = '';
+  document.getElementById('pwStatus').textContent = '';
+  if(!showing){ form.reset(); document.getElementById('pwCurrent').focus(); }
+});
+
+document.getElementById('passwordForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const errEl = document.getElementById('pwError');
+  const statusEl = document.getElementById('pwStatus');
+  const submitBtn = document.getElementById('pwSubmitBtn');
+  errEl.textContent = '';
+  statusEl.textContent = '';
+
+  const current = document.getElementById('pwCurrent').value;
+  const next = document.getElementById('pwNew').value;
+  const confirmVal = document.getElementById('pwConfirm').value;
+
+  if(next.length < 8){ errEl.textContent = 'Yeni şifre en az 8 karakter olmalı.'; return; }
+  if(next !== confirmVal){ errEl.textContent = 'Yeni şifreler birbiriyle uyuşmuyor.'; return; }
+  if(next === current){ errEl.textContent = 'Yeni şifre mevcut şifreyle aynı olamaz.'; return; }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Kaydediliyor…';
+  try{
+    const res = await fetch('/api/admin/change-password', {
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({currentPassword: current, newPassword: next})
+    });
+    const body = await res.json().catch(()=>({}));
+    if(res.ok){
+      document.getElementById('passwordForm').reset();
+      document.getElementById('passwordForm').style.display = 'none';
+      statusEl.textContent = 'Şifre değiştirildi ✓ — masaüstü uygulamaları eski şifreyle kilitlenmedi, isteğe bağlı olarak "Masaüstü Oturumlarını Sonlandır" ile hepsini yeni şifreye zorlayabilirsin.';
+    } else {
+      errEl.textContent = body.error || 'İşlem başarısız.';
+    }
+  }catch(e){
+    errEl.textContent = 'Sunucuya bağlanılamadı.';
+  }finally{
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Kaydet';
+  }
 });
 
 async function refreshDeviceInfo(){
