@@ -13,13 +13,22 @@ const router = express.Router();
 // çakışma riski yoktur (her kayıt kendi benzersiz id'siyle gelir).
 // ON CONFLICT (id) DO NOTHING sayesinde aynı kayıt iki kez gönderilirse
 // (ör. istemci zaman aşımında tekrar dener) sorun çıkmaz.
+//
+// Güvenilirlik notu: her kayıt kendi SAVEPOINT'i içinde denenir. Böylece
+// aramızdan biri artık var olmayan bir müşteriye/projeye bağlı bozuk/eski
+// bir kayıt gönderse bile (örn. o müşteri başka biri tarafından silinmiş),
+// SADECE o kayıt reddedilir — pakette birlikte gelen diğer geçerli
+// kayıtlar yine de kaydedilir. Aksi halde (tek transaction, tek hata =
+// hepsi rollback) bozuk bir kayıt o cihazın senkronunu sonsuza dek
+// tıkayabilirdi (istemci her denemede aynı bozuk kaydı da göndermeye
+// devam eder).
 router.post('/sync/push', async (req, res) => {
   const { records } = req.body || {};
   if (!Array.isArray(records)) {
     return res.status(400).json({ error: 'Geçersiz gövde: records (dizi) gerekli.' });
   }
   if (records.length === 0) {
-    return res.json({ ok: true, inserted: 0 });
+    return res.json({ ok: true, inserted: 0, failed: [] });
   }
   if (records.length > 500) {
     return res.status(400).json({ error: 'Tek seferde en fazla 500 kayıt gönderilebilir.' });
@@ -40,16 +49,30 @@ router.post('/sync/push', async (req, res) => {
 
   const client = await pool.connect();
   let inserted = 0;
+  const failed = [];
   try {
     await client.query('BEGIN');
-    for (const r of sorted) {
-      await insertRow(client, r.table, r.data, { ignoreConflict: true });
-      inserted++;
+    for (let i = 0; i < sorted.length; i++) {
+      const r = sorted[i];
+      const sp = 'sp_' + i;
+      try {
+        await client.query(`SAVEPOINT ${sp}`);
+        await insertRow(client, r.table, r.data, { ignoreConflict: true });
+        await client.query(`RELEASE SAVEPOINT ${sp}`);
+        inserted++;
+      } catch (rowErr) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${sp}`);
+        console.error('Senkron kaydı reddedildi:', r.table, r.data.id, rowErr.message);
+        failed.push({ table: r.table, id: r.data.id, error: rowErr.message });
+      }
     }
-    await client.query('UPDATE app_state_meta SET version = version + 1, updated_at = now() WHERE id = TRUE');
+    // En az bir şey değiştiyse (eklendiyse) version'ı ilerlet.
+    if (inserted > 0) {
+      await client.query('UPDATE app_state_meta SET version = version + 1, updated_at = now() WHERE id = TRUE');
+    }
     const versionRes = await client.query('SELECT version FROM app_state_meta WHERE id = TRUE');
     await client.query('COMMIT');
-    res.json({ ok: true, inserted, version: versionRes.rows[0].version });
+    res.json({ ok: true, inserted, failed, version: versionRes.rows[0].version });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('POST /api/sync/push hatası:', err);

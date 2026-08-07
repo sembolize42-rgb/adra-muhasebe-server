@@ -8,9 +8,13 @@ if (!process.env.DATABASE_URL) {
 // bağlantılarında (docker/local kurulum) SSL genelde kapalıdır.
 const isLocal = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL);
 
+// rejectUnauthorized:true — sertifika doğrulaması AÇIK. Bunu false yapmak
+// bağlantıyı şifreli ama doğrulamasız bırakır (man-in-the-middle'a açık);
+// Neon güvenilir bir CA'dan imzalı sertifika sunduğu için tam doğrulama
+// sorunsuz çalışıyor (test edildi).
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: isLocal ? false : { rejectUnauthorized: false }
+  ssl: isLocal ? false : { rejectUnauthorized: true }
 });
 
 pool.on('error', (err) => {

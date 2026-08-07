@@ -3,6 +3,8 @@ const express = require('express');
 const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 
 const pool = require('./db/pool');
@@ -19,7 +21,15 @@ if (!process.env.SESSION_SECRET) {
   process.exit(1);
 }
 
-app.set('trust proxy', 1); // Railway gibi ters proxy arkasında doğru IP/HTTPS algısı için
+app.set('trust proxy', 1); // Render gibi ters proxy arkasında doğru IP/HTTPS algısı için
+
+// Güvenlik başlıkları (X-Content-Type-Options, X-Frame-Options,
+// Referrer-Policy, HSTS, X-Powered-By kaldırma, vb.). CSP'yi burada
+// KAPALI tutuyoruz — web arayüzü hâlâ satır-içi <script>/<style> ve
+// CDN'den ExcelJS kullanıyor; bunları kırmadan doğru bir CSP yazmak ayrı
+// bir iş. Masaüstü uygulaması zaten kendi CSP'sini local sunucusundan
+// (desktop/main.js) ayrıca uyguluyor.
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // Masaüstü uygulaması (Electron), kendi sabit local portundan bu API'ye
 // Bearer token ile istek atar — bu yüzden sadece o origin'e CORS izni
@@ -30,6 +40,18 @@ app.use('/api', cors({
   origin: DESKTOP_ORIGIN,
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Genel API rate-limit: normal kullanım (birkaç kişi, dakikada bir senkron
+// kontrolü) çok altında, ama sızmış bir token'la yapılacak toplu kötüye
+// kullanımı ya da bozuk bir istemcinin sonsuz döngüsünü sınırlıyor.
+// /login kendi daha sıkı limitine sahip (routes/auth.js).
+app.use('/api', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Çok fazla istek, biraz sonra tekrar dene.' }
 }));
 
 app.use(express.json({ limit: '2mb' }));
@@ -56,6 +78,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Genel hata yakalayıcı: beklenmeyen bir hata Express'in varsayılan HTML
+// hata sayfasını (ve NODE_ENV=production olmadığında stack trace'i)
+// döndürmesin — API her zaman JSON döner.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('Beklenmeyen hata:', err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Sunucu hatası.' });
 });
 
 app.listen(PORT, () => {

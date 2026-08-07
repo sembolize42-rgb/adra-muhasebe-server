@@ -40,6 +40,14 @@
     display:flex;
     flex-direction:column;
     padding:24px 0;
+    /* İçerik (Kasa gibi uzun sekmeler) sayfayı sidebar'dan çok daha uzun
+       yapabiliyor; sidebar'ı görünüm alanına sabitleyip kendi içinde
+       kaydırılabilir yapmazsak alt kısımdaki Çıkış/Yedek/Oturum Sonlandır
+       butonları sayfanın en altına itilip pratikte erişilemez hale gelir. */
+    position:sticky;
+    top:0;
+    height:100vh;
+    overflow-y:auto;
   }
   .brand{
     padding:0 20px 20px 20px;
@@ -350,6 +358,8 @@
       <div id="importMsg" style="font-size:10px;margin-top:6px;color:#8FA6C9;"></div>
       <button class="sidebar-btn" id="logoutBtn" style="margin-top:14px;">Çıkış Yap</button>
       <div class="save-status" id="saveStatus"></div>
+      <button class="sidebar-btn" id="revokeDevicesBtn" style="margin-top:14px;border-color:#8A4A4A;color:#E8A79A;">Masaüstü Oturumlarını Sonlandır</button>
+      <div class="save-status" id="deviceInfo"></div>
     </div>
   </aside>
   <main>
@@ -451,6 +461,7 @@ async function boot(){
       showApp();
       await loadData();
       render();
+      refreshDeviceInfo();
     } else {
       showLoginScreen();
     }
@@ -488,6 +499,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
       document.getElementById('content').innerHTML = '<div class="empty">Yükleniyor…</div>';
       await loadData();
       render();
+      refreshDeviceInfo();
     } else {
       errEl.textContent = body.error || 'Sunucuya bağlanılamadı, tekrar dener misin?';
     }
@@ -502,6 +514,31 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 document.getElementById('logoutBtn').addEventListener('click', async ()=>{
   await fetch('/api/logout', {method:'POST', credentials:'same-origin'});
   showLoginScreen();
+});
+
+async function refreshDeviceInfo(){
+  const el = document.getElementById('deviceInfo');
+  if(!el) return;
+  try{
+    const res = await fetch('/api/admin/device-tokens', {credentials:'same-origin'});
+    if(!res.ok) return;
+    const body = await res.json();
+    el.textContent = body.tokens.length ? body.tokens.length + ' masaüstü oturumu açık' : 'Açık masaüstü oturumu yok';
+  }catch(e){ /* önemli değil, sessizce geç */ }
+}
+
+document.getElementById('revokeDevicesBtn').addEventListener('click', async ()=>{
+  if(!confirm('Tüm masaüstü uygulaması oturumları (bu bilgisayar dahil tüm cihazlar) sonlandırılacak. Herkesin masaüstü uygulamasında şifreyi tekrar girmesi gerekecek. Devam edilsin mi?\n\nBir bilgisayar kaybolduğunda/çalındığında kullanılması içindir — veri kaybı olmaz.')) return;
+  try{
+    const res = await fetch('/api/admin/revoke-device-tokens', {method:'POST', credentials:'same-origin'});
+    const body = await res.json().catch(()=>({}));
+    if(res.ok){
+      alert((body.revoked||0) + ' masaüstü oturumu sonlandırıldı.');
+      refreshDeviceInfo();
+    } else {
+      alert(body.error || 'İşlem başarısız.');
+    }
+  }catch(e){ alert('Sunucuya bağlanılamadı.'); }
 });
 
 boot();
