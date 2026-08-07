@@ -864,7 +864,11 @@ function styleTotalRow(row, accentSoft, accentColor){
   row.height = 20;
 }
 
-function addLedgerSheet(wb, name, columns, rows, totalLabel, totalValue, amountColIdx, accentSoft, accentColor, extraMoneyCols, emptyMsg, labelColIdx, noTotal){
+// Veri içermeyen bölümler için sheet HİÇ oluşturulmaz (PDF'teki "boş
+// bölüm çıktıya girmez" davranışıyla aynı) — çalışma kitabı gezgininde
+// tıklayınca "kayıt yok" yazan boş sekmelerle dolmasın diye.
+function addLedgerSheet(wb, name, columns, rows, totalLabel, totalValue, amountColIdx, accentSoft, accentColor, extraMoneyCols, labelColIdx, noTotal){
+  if(!rows.length) return null;
   const ws = wb.addWorksheet(name, {views:[{state:'frozen', ySplit:1}], properties:{tabColor:{argb:accentColor||XLS_COLOR.blueprint}}});
   ws.columns = columns.map(c=>({header:c.header, key:c.key, width:c.width}));
   styleHeaderRow(ws.getRow(1));
@@ -879,7 +883,7 @@ function addLedgerSheet(wb, name, columns, rows, totalLabel, totalValue, amountC
       extraMoneyCols.forEach(idx=>{ row.getCell(idx).numFmt = '#,##0.00" ₺"'; row.getCell(idx).alignment = {horizontal:'right'}; });
     }
   });
-  if(rows.length && !noTotal){
+  if(!noTotal){
     const totalObj = {}; columns.forEach(c=>totalObj[c.key]='');
     totalObj[columns[(labelColIdx!==undefined?labelColIdx:1)].key] = totalLabel;
     if(amountColIdx!==undefined) totalObj[columns[amountColIdx-1].key] = totalValue;
@@ -889,11 +893,6 @@ function addLedgerSheet(wb, name, columns, rows, totalLabel, totalValue, amountC
       tRow.getCell(amountColIdx).numFmt = '#,##0.00" ₺"';
       tRow.getCell(amountColIdx).alignment = {horizontal:'right'};
     }
-  } else if(!rows.length){
-    const emptyRow = ws.addRow({});
-    ws.mergeCells(2,1,2,columns.length);
-    emptyRow.getCell(1).value = emptyMsg || 'Bu tarih aralığında kayıt bulunamadı.';
-    emptyRow.getCell(1).font = {italic:true, color:{argb:'FF9AA3AF'}};
   }
   ws.autoFilter = {from:{row:1, column:1}, to:{row:ws.rowCount, column:columns.length}};
   return ws;
@@ -1101,13 +1100,11 @@ async function exportExcel(startDate, endDate){
 
   addLedgerSheet(wb, 'Cari Hesap',
     [{header:'Tarih',key:'tarih',width:12},{header:'Cari Adı',key:'musteri',width:24},{header:'Tip',key:'tip',width:12},{header:'Tür',key:'tur',width:12},{header:'Açıklama',key:'aciklama',width:26},{header:'Tutar',key:'tutar',width:14}],
-    cariRows, 'NET (Tahsilat/Ödeme - Borç)', cariTahsilToplam-cariBorcToplam, 6, XLS_COLOR.blueprintSoft, XLS_COLOR.blueprint, null,
-    'Bu tarih aralığında cari hareketi bulunamadı.');
+    cariRows, 'NET (Tahsilat/Ödeme - Borç)', cariTahsilToplam-cariBorcToplam, 6, XLS_COLOR.blueprintSoft, XLS_COLOR.blueprint, null);
 
   addLedgerSheet(wb, 'Cari Bakiye',
     [{header:'Cari Adı',key:'musteri',width:26},{header:'Tip',key:'tip',width:12},{header:'Toplam Borç',key:'toplamBorc',width:16},{header:'Toplam Tahsilat/Ödeme',key:'toplamTahsilat',width:20},{header:'Net Bakiye',key:'bakiye',width:16}],
-    cariBakiyeRows, 'TOPLAM', musteriBakiyeToplam+tedarikciBakiyeToplam, 5, XLS_COLOR.blueprintSoft, XLS_COLOR.blueprint, [3,4],
-    'Henüz kayıtlı cari hesap yok.', 0);
+    cariBakiyeRows, 'TOPLAM', musteriBakiyeToplam+tedarikciBakiyeToplam, 5, XLS_COLOR.blueprintSoft, XLS_COLOR.blueprint, [3,4], 0);
 
   addLedgerSheet(wb, 'Proje Maliyetleri',
     [{header:'Tarih',key:'tarih',width:12},{header:'Proje',key:'proje',width:24},{header:'Kategori',key:'kategori',width:18},{header:'Açıklama',key:'aciklama',width:26},{header:'Tutar',key:'tutar',width:14}],
@@ -1115,8 +1112,7 @@ async function exportExcel(startDate, endDate){
 
   addLedgerSheet(wb, 'Proje Özeti',
     [{header:'Proje',key:'proje',width:24},{header:'Müşteri',key:'musteri',width:20},{header:'Bütçe',key:'butce',width:14},{header:'Harcanan',key:'harcanan',width:14},{header:'Kalan',key:'kalan',width:14}],
-    projSummaryRows, 'TOPLAM', projSpentToplam, 4, XLS_COLOR.blueprintSoft, XLS_COLOR.blueprint, [3,5],
-    'Henüz kayıtlı proje yok.');
+    projSummaryRows, 'TOPLAM', projSpentToplam, 4, XLS_COLOR.blueprintSoft, XLS_COLOR.blueprint, [3,5]);
 
   addLedgerSheet(wb, 'Banka Hesapları',
     [{header:'Hesap',key:'hesap',width:26},{header:'Bakiye',key:'bakiye',width:18}],
@@ -1128,8 +1124,7 @@ async function exportExcel(startDate, endDate){
 
   addLedgerSheet(wb, 'Borçlar',
     [{header:'Tarih',key:'tarih',width:12},{header:'İsim',key:'isim',width:24},{header:'Para Birimi',key:'paraBirimi',width:12},{header:'Miktar',key:'miktar',width:14},{header:'Kalan',key:'kalan',width:14},{header:'Açıklama',key:'aciklama',width:24}],
-    loanRows, '', undefined, undefined, XLS_COLOR.redSoft, XLS_COLOR.red, undefined,
-    'Bu tarih aralığında borç kaydı bulunamadı.', 0, true);
+    loanRows, '', undefined, undefined, XLS_COLOR.redSoft, XLS_COLOR.red, undefined, 0, true);
 
   addLedgerSheet(wb, 'Borç Ödemeleri',
     [{header:'Tarih',key:'tarih',width:12},{header:'İsim',key:'isim',width:24},{header:'Para Birimi',key:'paraBirimi',width:12},{header:'Ödenen (Döviz)',key:'odenenDoviz',width:16},{header:'Kur',key:'kur',width:10},{header:'TL Karşılığı',key:'tlKarsiligi',width:16},{header:'Hesap',key:'hesap',width:14},{header:'Açıklama',key:'aciklama',width:22}],
