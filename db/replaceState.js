@@ -152,4 +152,4 @@ async function replaceState(client, state, { bumpVersion = true } = {}) {
   }
 }
 
-module.exports = { replaceState, insertRow, KNOWN_KEYS };
+module.exports = { replaceState, insertRow, KNOWN_KEYS, ORDER };

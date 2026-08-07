@@ -1,6 +1,6 @@
 const express = require('express');
 const pool = require('../db/pool');
-const { insertRow, KNOWN_KEYS } = require('../db/replaceState');
+const { insertRow, KNOWN_KEYS, ORDER } = require('../db/replaceState');
 
 const router = express.Router();
 
@@ -31,11 +31,18 @@ router.post('/sync/push', async (req, res) => {
     }
   }
 
+  // Kayıtları istemcinin gönderdiği sırada değil, ORDER'a (parent->child)
+  // göre işle — offline'da eklenen bir "yeni müşteri" ve o müşteriye bağlı
+  // "yeni gelir" aynı pakette gelirse, foreign key hatası almadan müşteri
+  // önce eklenmeli.
+  const rank = Object.fromEntries(ORDER.map((k, i) => [k, i]));
+  const sorted = [...records].sort((a, b) => (rank[a.table] ?? 999) - (rank[b.table] ?? 999));
+
   const client = await pool.connect();
   let inserted = 0;
   try {
     await client.query('BEGIN');
-    for (const r of records) {
+    for (const r of sorted) {
       await insertRow(client, r.table, r.data, { ignoreConflict: true });
       inserted++;
     }
