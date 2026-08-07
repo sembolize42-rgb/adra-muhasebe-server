@@ -231,13 +231,14 @@ function viewKasa(){
     }).join('')}</tbody></table></div>`}
   </section>
   <section class="panel">
-    <h2>Excel Dökümü</h2>
+    <h2>Dışa Aktar</h2>
     <div class="row-form" style="border-bottom:none;padding-bottom:0;margin-bottom:0;">
       <div class="field"><label>Başlangıç</label><input type="date" id="exportStart"></div>
       <div class="field"><label>Bitiş</label><input type="date" id="exportEnd"></div>
       <button class="btn" id="exportExcelBtn" type="button">Excel İndir (.xlsx)</button>
+      <button class="btn ghost" id="exportPdfBtn" type="button">PDF İndir (.pdf)</button>
     </div>
-    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">Tarih seçmezsen tüm kayıtlar dahil edilir. Dosyada kasa (gelir/gider) ve kredi kartı hareketleri ayrı sayfalarda, bir de özet sayfasıyla birlikte yer alır.</div>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin-top:8px;">Tarih seçmezsen tüm kayıtlar dahil edilir. Her iki dosyada da kasa (gelir/gider), kredi kartı, çekler, cari, proje ve borç hareketleri ayrı bölümlerde, bir de özet ile birlikte yer alır.</div>
   </section>
   <section class="panel">
     <h2>Son Hareketler</h2>
@@ -898,8 +899,10 @@ function addLedgerSheet(wb, name, columns, rows, totalLabel, totalValue, amountC
   return ws;
 }
 
-async function exportExcel(startDate, endDate){
-  if(typeof ExcelJS === 'undefined'){ alert('Excel kütüphanesi yüklenemedi. İnternet bağlantını kontrol edip tekrar dener misin?'); return; }
+// Excel ve PDF dökümlerinin ikisi de aynı veriyi kullanır — iş mantığının
+// iki kere yazılıp aralarında sapması riskini önlemek için tek bir yerde
+// toplanıyor.
+function gatherExportData(startDate, endDate){
   const inRange = d => (!startDate || d>=startDate) && (!endDate || d<=endDate);
 
   const gelirList = state.transactions.filter(t=>t.type==='gelir' && inRange(t.date)).sort((a,b)=>a.date.localeCompare(b.date));
@@ -1004,14 +1007,6 @@ async function exportExcel(startDate, endDate){
   });
   const loanPaymentToplamTRY = loanPaymentRows.reduce((s,r)=>s+r.tlKarsiligi,0);
 
-  const wb = new ExcelJS.Workbook();
-  wb.creator = 'Adra Muhasebe';
-  wb.created = new Date();
-
-  // ÖZET
-  const wsSummary = wb.addWorksheet('Özet', {properties:{tabColor:{argb:XLS_COLOR.ink}}});
-  wsSummary.columns = [{header:'Alan', key:'alan', width:30}, {header:'Değer', key:'deger', width:20}];
-  styleHeaderRow(wsSummary.getRow(1));
   const summaryData = [
     ['Başlangıç Tarihi', startDate ? fmtDate(startDate) : 'Tümü'],
     ['Bitiş Tarihi', endDate ? fmtDate(endDate) : 'Tümü'],
@@ -1043,6 +1038,34 @@ async function exportExcel(startDate, endDate){
     ['Kalan Borç (€)', state.loans.filter(l=>l.currency==='EUR').reduce((s,l)=>s+loanBalance(l),0)]
   ];
   const moneyRows = ['Nakit Bakiyesi (Güncel)','Toplam Kasa Bakiyesi (Güncel)','Toplam Gelir','Toplam Gider','Net (Gelir - Gider)','Toplam Çek Tutarı','Toplam Ortak Çekişi','Güncel Toplam Müşteri Alacağı','Güncel Toplam Tedarikçi Borcu','Toplam Proje Maliyeti (Aralıkta)','Toplam Kredi Kartı Harcaması','Ödenen Kredi Kartı Tutarı','Ödenmemiş Kredi Kartı Tutarı','Kalan Borç (₺)'].concat(state.bankAccounts.filter(b=>!b.archived).map(b=>b.name+' Bakiyesi (Güncel)'));
+
+  return {
+    gelirRows, gelirToplam, giderRows, giderToplam, cardRows, kkToplam, kkOdenen,
+    checkRows, cekToplam, maasRows, maasToplam, cariRows, cariBorcToplam, cariTahsilToplam,
+    cariBakiyeRows, musteriBakiyeToplam, tedarikciBakiyeToplam, costRows, costToplam,
+    projSummaryRows, projSpentToplam, bankRows, bankToplam, transferRows, transferToplam,
+    loanRows, loanPaymentRows, loanPaymentToplamTRY, summaryData, moneyRows
+  };
+}
+
+async function exportExcel(startDate, endDate){
+  if(typeof ExcelJS === 'undefined'){ alert('Excel kütüphanesi yüklenemedi. İnternet bağlantını kontrol edip tekrar dener misin?'); return; }
+  const {
+    gelirRows, gelirToplam, giderRows, giderToplam, cardRows, kkToplam, kkOdenen,
+    checkRows, cekToplam, maasRows, maasToplam, cariRows, cariBorcToplam, cariTahsilToplam,
+    cariBakiyeRows, musteriBakiyeToplam, tedarikciBakiyeToplam, costRows, costToplam,
+    projSummaryRows, projSpentToplam, bankRows, bankToplam, transferRows, transferToplam,
+    loanRows, loanPaymentRows, loanPaymentToplamTRY, summaryData, moneyRows
+  } = gatherExportData(startDate, endDate);
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Adra Muhasebe';
+  wb.created = new Date();
+
+  // ÖZET
+  const wsSummary = wb.addWorksheet('Özet', {properties:{tabColor:{argb:XLS_COLOR.ink}}});
+  wsSummary.columns = [{header:'Alan', key:'alan', width:30}, {header:'Değer', key:'deger', width:20}];
+  styleHeaderRow(wsSummary.getRow(1));
   summaryData.forEach(([alan,deger],i)=>{
     const row = wsSummary.addRow({alan, deger});
     const isNet = alan==='Net (Gelir - Gider)';
@@ -1122,6 +1145,208 @@ async function exportExcel(startDate, endDate){
   URL.revokeObjectURL(url);
 }
 
+function argbToRgb(argb){
+  const hex = argb.slice(2); // 'FF2B5797' -> '2B5797' (alfa kanalını at)
+  return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+}
+const PDF_COLOR = {
+  ink: argbToRgb(XLS_COLOR.ink), blueprint: argbToRgb(XLS_COLOR.blueprint),
+  green: argbToRgb(XLS_COLOR.green), red: argbToRgb(XLS_COLOR.red),
+  blueprintSoft: argbToRgb(XLS_COLOR.blueprintSoft), greenSoft: argbToRgb(XLS_COLOR.greenSoft),
+  redSoft: argbToRgb(XLS_COLOR.redSoft)
+};
+
+// Kurumsal, yoğun (az sayfa, dolu tablolar) rapor: bölümler tek bir akış
+// halinde art arda dizilir (her biri ayrı sayfa almaz), veri içermeyen
+// bölümler çıktıya hiç girmez.
+async function exportPDF(startDate, endDate){
+  if(typeof window.jspdf === 'undefined'){ alert('PDF kütüphanesi yüklenemedi. İnternet bağlantını kontrol edip tekrar dener misin?'); return; }
+  const data = gatherExportData(startDate, endDate);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'landscape', unit:'pt', format:'a4' });
+
+  // jsPDF'in varsayılan fontu (Helvetica) Türkçe karakterleri (ı, ş, ğ vb.)
+  // doğru göstermiyor — gömülü Unicode font (Roboto, pdf-fonts.js) varsa
+  // onu kullan. Yoksa (dosya bir şekilde yüklenemediyse) varsayılana düş,
+  // en azından PDF üretimi tamamen başarısız olmasın.
+  const hasTrFont = typeof PDF_FONT_REGULAR_B64 !== 'undefined';
+  if(hasTrFont){
+    doc.addFileToVFS('Roboto-Regular.ttf', PDF_FONT_REGULAR_B64);
+    doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+    doc.addFileToVFS('Roboto-Bold.ttf', PDF_FONT_BOLD_B64);
+    doc.addFont('Roboto-Bold.ttf', 'Roboto', 'bold');
+    doc.setFont('Roboto');
+  }
+  const FONT = hasTrFont ? 'Roboto' : undefined;
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const M = 36; // sayfa kenar boşluğu
+  const FOOT_H = 26; // altbilgi için ayrılan alan
+  const TABLE_STYLES = { font:FONT, fontSize:7.5, cellPadding:{top:2.5,right:5,bottom:2.5,left:5}, textColor:PDF_COLOR.ink, lineColor:[224,224,224], lineWidth:0.5 };
+
+  let cursorY = M;
+
+  function ensureSpace(neededHeight){
+    if(cursorY + neededHeight > pageH - FOOT_H){
+      doc.addPage();
+      cursorY = M;
+    }
+  }
+
+  function sectionTitle(title, color){
+    ensureSpace(30);
+    doc.setFontSize(10.5);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(...color);
+    doc.text(title, M, cursorY + 10);
+    doc.setFont(undefined, 'normal');
+    cursorY += 18;
+  }
+
+  function section(title, head, rows, totalLabel, totalValue, accentColor, accentSoft){
+    if(!rows.length) return; // veri yoksa bölüm çıktıya hiç girmez
+    ensureSpace(48); // başlık + en az birkaç satır için yer garantisi
+    sectionTitle(title, accentColor);
+    const foot = totalLabel ? [[
+      { content: totalLabel, colSpan: head.length-1, styles:{ halign:'right', fontStyle:'bold', textColor: accentColor } },
+      { content: totalValue, styles:{ halign:'right', fontStyle:'bold', textColor: accentColor } }
+    ]] : undefined;
+    doc.autoTable({
+      startY: cursorY,
+      margin: { left:M, right:M, top:M, bottom:FOOT_H },
+      head: [head],
+      body: rows,
+      foot,
+      styles: TABLE_STYLES,
+      headStyles: { fillColor: accentColor, textColor:255, fontStyle:'bold', fontSize:7.5 },
+      footStyles: { fillColor: accentSoft || [240,240,240], fontSize:7.5 },
+      alternateRowStyles: { fillColor:[250,249,246] }
+    });
+    cursorY = doc.lastAutoTable.finalY + 16;
+  }
+
+  // ---- Rapor başlığı (sadece en üstte, bir kez) ----
+  doc.setFontSize(15);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(...PDF_COLOR.ink);
+  doc.text('Adra Muhasebe', M, cursorY + 14);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(9.5);
+  doc.setTextColor(120,120,120);
+  const rangeTxt = 'Rapor aralığı: ' + (startDate?fmtDate(startDate):'Tümü') + ' – ' + (endDate?fmtDate(endDate):'Tümü') + '   ·   Oluşturulma: ' + fmtDate(today());
+  doc.text(rangeTxt, M, cursorY + 28);
+  doc.setDrawColor(...PDF_COLOR.ink);
+  doc.setLineWidth(1);
+  doc.line(M, cursorY + 36, pageW-M, cursorY + 36);
+  cursorY += 50;
+
+  // ---- Özet: iki sütuna bölünmüş kompakt tablo (dikey yer tasarrufu) ----
+  sectionTitle('Özet', PDF_COLOR.blueprint);
+  const summaryRows = data.summaryData.map(([alan,deger])=>{
+    const isMoney = data.moneyRows.includes(alan);
+    const val = typeof deger==='number' ? (isMoney ? fmt(deger)+' ₺' : String(deger)) : deger;
+    return [alan, val];
+  });
+  const half = Math.ceil(summaryRows.length/2);
+  const colGap = 16;
+  const colW = (pageW - M*2 - colGap) / 2;
+  const summaryStartY = cursorY;
+  doc.autoTable({
+    startY: summaryStartY,
+    margin: { left:M, right: pageW - M - colW },
+    tableWidth: colW,
+    head: [['Alan','Değer']],
+    body: summaryRows.slice(0, half),
+    styles: TABLE_STYLES,
+    headStyles: { fillColor: PDF_COLOR.blueprint, textColor:255, fontStyle:'bold', fontSize:7.5 },
+    columnStyles: { 1: { halign:'right' } },
+    alternateRowStyles: { fillColor:[250,249,246] }
+  });
+  const finalY1 = doc.lastAutoTable.finalY;
+  doc.autoTable({
+    startY: summaryStartY,
+    margin: { left: M + colW + colGap, right:M },
+    tableWidth: colW,
+    head: [['Alan','Değer']],
+    body: summaryRows.slice(half),
+    styles: TABLE_STYLES,
+    headStyles: { fillColor: PDF_COLOR.blueprint, textColor:255, fontStyle:'bold', fontSize:7.5 },
+    columnStyles: { 1: { halign:'right' } },
+    alternateRowStyles: { fillColor:[250,249,246] }
+  });
+  const finalY2 = doc.lastAutoTable.finalY;
+  cursorY = Math.max(finalY1, finalY2) + 16;
+
+  section('Gelir', ['Tarih','Açıklama','Kategori','Proje','Hesap','Cari','Tutar'],
+    data.gelirRows.map(r=>[r.tarih,r.aciklama,r.kategori,r.proje,r.hesap,r.cari,fmt(r.tutar)+' ₺']),
+    'TOPLAM', fmt(data.gelirToplam)+' ₺', PDF_COLOR.green, PDF_COLOR.greenSoft);
+
+  section('Gider', ['Tarih','Açıklama','Kategori','Proje','Hesap','Tutar'],
+    data.giderRows.map(r=>[r.tarih,r.aciklama,r.kategori,r.proje,r.hesap,fmt(r.tutar)+' ₺']),
+    'TOPLAM', fmt(data.giderToplam)+' ₺', PDF_COLOR.red, PDF_COLOR.redSoft);
+
+  section('Kredi Kartı', ['Tarih','Kart','Açıklama','Tutar','Durum','Ödeme Tarihi'],
+    data.cardRows.map(r=>[r.tarih,r.kart,r.aciklama,fmt(r.tutar)+' ₺',r.durum,r.odemeTarihi]),
+    'TOPLAM', fmt(data.kkToplam)+' ₺', PDF_COLOR.blueprint, PDF_COLOR.blueprintSoft);
+
+  section('Çekler', ['Alınma','Vade','Yön','Banka / Çek No','Açıklama','Hesap','Tutar','Durum'],
+    data.checkRows.map(r=>[r.alinma,r.tarih,r.yon,r.banka,r.aciklama,r.hesap,fmt(r.tutar)+' ₺',r.durum]),
+    'TOPLAM', fmt(data.cekToplam)+' ₺', PDF_COLOR.blueprint, PDF_COLOR.blueprintSoft);
+
+  section('Maaşlar', ['Tarih','Ortak','Açıklama','Hesap','Tutar','Kayda Alındı'],
+    data.maasRows.map(r=>[r.tarih,r.ortak,r.aciklama,r.hesap,fmt(r.tutar)+' ₺',r.kaydaAlindi]),
+    'TOPLAM', fmt(data.maasToplam)+' ₺', PDF_COLOR.red, PDF_COLOR.redSoft);
+
+  section('Cari Hesap', ['Tarih','Cari Adı','Tip','Tür','Açıklama','Tutar'],
+    data.cariRows.map(r=>[r.tarih,r.musteri,r.tip,r.tur,r.aciklama,fmt(r.tutar)+' ₺']),
+    'NET (Tahsilat/Ödeme - Borç)', fmt(data.cariTahsilToplam-data.cariBorcToplam)+' ₺', PDF_COLOR.blueprint, PDF_COLOR.blueprintSoft);
+
+  section('Cari Bakiye', ['Cari Adı','Tip','Toplam Borç','Toplam Tahsilat/Ödeme','Net Bakiye'],
+    data.cariBakiyeRows.map(r=>[r.musteri,r.tip,fmt(r.toplamBorc)+' ₺',fmt(r.toplamTahsilat)+' ₺',fmt(r.bakiye)+' ₺']),
+    'TOPLAM', fmt(data.musteriBakiyeToplam+data.tedarikciBakiyeToplam)+' ₺', PDF_COLOR.blueprint, PDF_COLOR.blueprintSoft);
+
+  section('Proje Maliyetleri', ['Tarih','Proje','Kategori','Açıklama','Tutar'],
+    data.costRows.map(r=>[r.tarih,r.proje,r.kategori,r.aciklama,fmt(r.tutar)+' ₺']),
+    'TOPLAM', fmt(data.costToplam)+' ₺', PDF_COLOR.red, PDF_COLOR.redSoft);
+
+  section('Proje Özeti', ['Proje','Müşteri','Bütçe','Harcanan','Kalan'],
+    data.projSummaryRows.map(r=>[r.proje,r.musteri,fmt(r.butce)+' ₺',fmt(r.harcanan)+' ₺',fmt(r.kalan)+' ₺']),
+    'TOPLAM', fmt(data.projSpentToplam)+' ₺', PDF_COLOR.blueprint, PDF_COLOR.blueprintSoft);
+
+  section('Banka Hesapları', ['Hesap','Bakiye'],
+    data.bankRows.map(r=>[r.hesap,fmt(r.bakiye)+' ₺']),
+    'TOPLAM', fmt(data.bankToplam)+' ₺', PDF_COLOR.blueprint, PDF_COLOR.blueprintSoft);
+
+  section('Transferler', ['Tarih','Kaynak','Hedef','Açıklama','Tutar'],
+    data.transferRows.map(r=>[r.tarih,r.kaynak,r.hedef,r.aciklama,fmt(r.tutar)+' ₺']),
+    'TOPLAM', fmt(data.transferToplam)+' ₺', PDF_COLOR.blueprint, PDF_COLOR.blueprintSoft);
+
+  section('Borçlar', ['Tarih','İsim','Para Birimi','Miktar','Kalan','Açıklama'],
+    data.loanRows.map(r=>[r.tarih,r.isim,r.paraBirimi,fmt(r.miktar),fmt(r.kalan),r.aciklama]),
+    null, null, PDF_COLOR.red, PDF_COLOR.redSoft);
+
+  section('Borç Ödemeleri', ['Tarih','İsim','Para Birimi','Ödenen (Döviz)','Kur','TL Karşılığı','Hesap','Açıklama'],
+    data.loanPaymentRows.map(r=>[r.tarih,r.isim,r.paraBirimi,fmt(r.odenenDoviz),r.kur,fmt(r.tlKarsiligi)+' ₺',r.hesap,r.aciklama]),
+    'TOPLAM', fmt(data.loanPaymentToplamTRY)+' ₺', PDF_COLOR.red, PDF_COLOR.redSoft);
+
+  // Alt bilgi: her sayfada ince bir çizgi + "Adra Muhasebe" + sayfa numarası
+  const pageCount = doc.internal.getNumberOfPages();
+  for(let i=1; i<=pageCount; i++){
+    doc.setPage(i);
+    doc.setDrawColor(220,220,220);
+    doc.setLineWidth(0.5);
+    doc.line(M, pageH-18, pageW-M, pageH-18);
+    doc.setFontSize(7.5);
+    doc.setTextColor(150,150,150);
+    doc.text('Adra Muhasebe', M, pageH-8);
+    doc.text(String(i)+' / '+pageCount, pageW-M, pageH-8, {align:'right'});
+  }
+
+  const fname = 'adra-muhasebe-'+(startDate||'basdan')+'_'+(endDate||'sona')+'.pdf';
+  doc.save(fname);
+}
+
 function emptyState(title, sub){
   return `<div class="empty"><b>${title}</b>${sub}</div>`;
 }
@@ -1144,6 +1369,25 @@ function attachHandlers(){
       } finally {
         exportBtn.disabled = false;
         exportBtn.textContent = originalText;
+      }
+    };
+  }
+  const exportPdfBtn = document.getElementById('exportPdfBtn');
+  if(exportPdfBtn){
+    exportPdfBtn.onclick = async ()=>{
+      const s = document.getElementById('exportStart').value;
+      const e = document.getElementById('exportEnd').value;
+      exportPdfBtn.disabled = true;
+      const originalText = exportPdfBtn.textContent;
+      exportPdfBtn.textContent = 'Hazırlanıyor…';
+      try{
+        await exportPDF(s||null, e||null);
+      } catch(err){
+        console.error(err);
+        alert('PDF dosyası oluşturulurken bir sorun oluştu.');
+      } finally {
+        exportPdfBtn.disabled = false;
+        exportPdfBtn.textContent = originalText;
       }
     };
   }
