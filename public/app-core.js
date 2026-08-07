@@ -1816,7 +1816,37 @@ function setupBackupControls(){
   };
 }
 
+// ---- Boşta kalma zaman aşımı ----
+// Bilgisayar açık/oturum girilmiş halde kilitlenmeden bırakılırsa, yanından
+// geçen herkes finans verilerini görebilir/değiştirebilir. 10 dakika hiç
+// işlem (fare/klavye) olmazsa otomatik çıkış yapılır, tekrar şifre
+// girilmesi gerekir. Çıkışın gerçek mekaniği (sunucu session'ını/token'ı
+// iptal etmek) ortama göre değiştiği için, her ortam (web/masaüstü) kendi
+// mantığını window.onIdleLogout olarak tanımlar — burası sadece süreyi izler.
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+let idleTimer = null;
+function armIdleTimer(){
+  if(idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(()=>{
+    if(typeof window.onIdleLogout === 'function') window.onIdleLogout();
+  }, IDLE_TIMEOUT_MS);
+}
+function clearIdleTimer(){
+  if(idleTimer){ clearTimeout(idleTimer); idleTimer = null; }
+}
+function handleUserActivity(){
+  // Sadece uygulama görünürken (login ekranında değilken) izle — aksi
+  // halde login ekranında bekleyen biri de "boşta" sayılıp anlamsız yere
+  // tetiklenmiş olur.
+  const appRoot = document.getElementById('appRoot');
+  if(appRoot && !appRoot.classList.contains('hidden')) armIdleTimer();
+}
+['mousemove','mousedown','keydown','wheel','touchstart','click'].forEach(evt=>{
+  document.addEventListener(evt, handleUserActivity, {passive:true});
+});
+
 function showLoginScreen(errorMsg){
+  clearIdleTimer();
   document.getElementById('appRoot').classList.add('hidden');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('loginError').textContent = errorMsg || '';
@@ -1828,6 +1858,7 @@ function showLoginScreen(errorMsg){
 function showApp(){
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appRoot').classList.remove('hidden');
+  armIdleTimer();
 }
 
 function openSidebar(){

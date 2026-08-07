@@ -525,10 +525,12 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   }
 });
 
-document.getElementById('logoutBtn').addEventListener('click', async ()=>{
-  await fetch('/api/logout', {method:'POST', credentials:'same-origin'});
-  showLoginScreen();
-});
+async function doLogout(reason){
+  try{ await fetch('/api/logout', {method:'POST', credentials:'same-origin'}); }catch(e){ /* çıkış zaten yerelde uygulanacak */ }
+  showLoginScreen(reason);
+}
+document.getElementById('logoutBtn').addEventListener('click', ()=>doLogout());
+window.onIdleLogout = ()=>doLogout('10 dakika işlem yapılmadığı için oturum otomatik kapatıldı. Devam etmek için şifreyi tekrar gir.');
 
 document.getElementById('togglePasswordFormBtn').addEventListener('click', ()=>{
   const form = document.getElementById('passwordForm');
