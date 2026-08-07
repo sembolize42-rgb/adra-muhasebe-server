@@ -144,3 +144,15 @@ INSERT INTO app_state_meta (id, version) VALUES (TRUE, 1) ON CONFLICT (id) DO NO
 
 -- Not: oturum (session) tablosu burada tanımlı değil — connect-pg-simple
 -- server açılışında `createTableIfMissing: true` ile kendisi oluşturuyor.
+
+-- Masaüstü uygulaması (Electron) için: web'in cookie-session'ı yerine uzun
+-- ömürlü bir Bearer token ile giriş yapar (cross-origin cookie/SameSite
+-- karmaşasından kaçınmak için). Şifre zaten paylaşılan ortak sır olduğundan
+-- ve bu token'a erişim zaten o sırrı bilmeyi gerektirdiğinden düz metin
+-- saklanıyor — bir API key'e eşdeğer risk profili.
+CREATE TABLE IF NOT EXISTS api_tokens (
+  token       TEXT PRIMARY KEY,
+  label       TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);

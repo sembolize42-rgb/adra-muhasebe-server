@@ -1,5 +1,8 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const pool = require('../db/pool');
+const { requireAuth, isAuthenticated } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -17,7 +20,7 @@ router.post('/login', async (req, res) => {
   }
   lastAttempt.set(ip, now);
 
-  const { password } = req.body || {};
+  const { password, wantToken, label } = req.body || {};
   const hash = process.env.APP_PASSWORD_HASH;
   if (!hash) {
     return res.status(500).json({ error: 'Sunucuda APP_PASSWORD_HASH ayarlı değil.' });
@@ -32,7 +35,19 @@ router.post('/login', async (req, res) => {
   }
 
   req.session.authenticated = true;
-  res.json({ ok: true });
+
+  // Sadece isteyen istemciye (masaüstü uygulaması) bir Bearer token üret.
+  // Web arayüzü bunu istemez, cookie-session yeterli.
+  let token = null;
+  if (wantToken) {
+    token = crypto.randomBytes(32).toString('hex');
+    await pool.query(
+      'INSERT INTO api_tokens (token, label) VALUES ($1,$2)',
+      [token, typeof label === 'string' ? label.slice(0, 200) : 'Masaüstü uygulaması']
+    );
+  }
+
+  res.json({ ok: true, token });
 });
 
 router.post('/logout', (req, res) => {
@@ -42,8 +57,18 @@ router.post('/logout', (req, res) => {
   });
 });
 
-router.get('/session', (req, res) => {
-  res.json({ authenticated: !!(req.session && req.session.authenticated) });
+// Masaüstü uygulaması "çıkış yap" dediğinde token'ı sunucudan da siler.
+router.post('/logout-token', requireAuth, async (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (match) {
+    await pool.query('DELETE FROM api_tokens WHERE token = $1', [match[1].trim()]);
+  }
+  res.json({ ok: true });
+});
+
+router.get('/session', async (req, res) => {
+  res.json({ authenticated: await isAuthenticated(req) });
 });
 
 module.exports = router;
