@@ -337,6 +337,27 @@
     </div>
     <div class="login-error" id="loginError"></div>
     <button class="btn" type="submit" id="loginSubmit">Giriş Yap</button>
+    <button type="button" id="forgotPasswordBtn" style="background:none;border:none;color:var(--ink-soft);font-size:11.5px;text-decoration:underline;cursor:pointer;font-family:inherit;margin-top:14px;padding:0;display:block;">Şifremi unuttum</button>
+  </form>
+  <form class="login-box" id="recoveryForm" style="display:none;margin-top:14px;">
+    <h1 style="font-size:16px;">Şifre Kurtarma</h1>
+    <div style="font-size:11.5px;color:var(--ink-soft);margin:-14px 0 16px 0;">Kurtarma şifresini gir, yeni bir ortak şifre belirle. Bu işlem tüm masaüstü oturumlarını sonlandırır — herkesin yeni şifreyle tekrar giriş yapması gerekir.</div>
+    <div class="field">
+      <label style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px;">Kurtarma Şifresi</label>
+      <input type="password" id="recoveryPassword" autocomplete="off" required>
+    </div>
+    <div class="field">
+      <label style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px;">Yeni Ortak Şifre (en az 8 karakter)</label>
+      <input type="password" id="recoveryNewPassword" autocomplete="new-password" required minlength="8">
+    </div>
+    <div class="field">
+      <label style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:5px;">Yeni Şifre (Tekrar)</label>
+      <input type="password" id="recoveryNewPasswordConfirm" autocomplete="new-password" required minlength="8">
+    </div>
+    <div class="login-error" id="recoveryError"></div>
+    <div class="save-status" id="recoveryStatus" style="margin-bottom:8px;"></div>
+    <button class="btn" type="submit" id="recoverySubmit">Şifreyi Sıfırla</button>
+    <button type="button" id="cancelRecoveryBtn" style="background:none;border:none;color:var(--ink-soft);font-size:11.5px;text-decoration:underline;cursor:pointer;font-family:inherit;margin-top:14px;padding:0;display:block;">Vazgeç, girişe dön</button>
   </form>
 </div>
 
@@ -522,6 +543,59 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   }finally{
     submitBtn.disabled = false;
     submitBtn.textContent = 'Giriş Yap';
+  }
+});
+
+document.getElementById('forgotPasswordBtn').addEventListener('click', ()=>{
+  document.getElementById('loginForm').style.display = 'none';
+  document.getElementById('recoveryForm').style.display = 'block';
+  document.getElementById('recoveryError').textContent = '';
+  document.getElementById('recoveryStatus').textContent = '';
+});
+document.getElementById('cancelRecoveryBtn').addEventListener('click', ()=>{
+  document.getElementById('recoveryForm').style.display = 'none';
+  document.getElementById('loginForm').style.display = 'block';
+  document.getElementById('recoveryForm').reset();
+});
+document.getElementById('recoveryForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const errEl = document.getElementById('recoveryError');
+  const statusEl = document.getElementById('recoveryStatus');
+  const submitBtn = document.getElementById('recoverySubmit');
+  errEl.textContent = '';
+  statusEl.textContent = '';
+
+  const recoveryPassword = document.getElementById('recoveryPassword').value;
+  const next = document.getElementById('recoveryNewPassword').value;
+  const confirmVal = document.getElementById('recoveryNewPasswordConfirm').value;
+  if(next.length < 8){ errEl.textContent = 'Yeni şifre en az 8 karakter olmalı.'; return; }
+  if(next !== confirmVal){ errEl.textContent = 'Yeni şifreler birbiriyle uyuşmuyor.'; return; }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Sıfırlanıyor…';
+  try{
+    const res = await fetch('/api/recover-password', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({recoveryPassword, newPassword: next})
+    });
+    const body = await res.json().catch(()=>({}));
+    if(res.ok){
+      document.getElementById('recoveryForm').reset();
+      statusEl.textContent = 'Şifre sıfırlandı ✓ Yeni şifreyle giriş yapabilirsin.';
+      setTimeout(()=>{
+        document.getElementById('recoveryForm').style.display = 'none';
+        document.getElementById('loginForm').style.display = 'block';
+        statusEl.textContent = '';
+      }, 2500);
+    } else {
+      errEl.textContent = body.error || 'İşlem başarısız.';
+    }
+  }catch(e){
+    errEl.textContent = 'Sunucuya bağlanılamadı.';
+  }finally{
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Şifreyi Sıfırla';
   }
 });
 

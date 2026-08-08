@@ -117,6 +117,63 @@ router.post('/admin/change-password', requireAuth, loginLimiter, async (req, res
   res.json({ ok: true });
 });
 
+// ---- Şifre kurtarma (unutulan ortak şifre için, sabit "kurtarma şifresi" ile) ----
+// .env'deki RECOVERY_PASSWORD_HASH, DB'deki ortak şifreden TAMAMEN ayrı,
+// sabit (programdan değiştirilemeyen) ikinci bir sırdır. Sadece güvenli bir
+// yerde (parola yöneticisi, kasa vb.) saklanan bu tek kurtarma şifresi
+// bilinmeden, unutulan ortak şifre programın kendisinden asla
+// sıfırlanamaz — .env/DB'ye sunucu erişimine gerek kalmaz. Başarılı bir
+// kurtarma TÜM masaüstü oturumlarını da sonlandırır (kim başka bir cihazda
+// oturum açık bırakmış olursa olsun, yeni şifreyle yeniden giriş yapması
+// gerekir) — reset-password.js scripti ile aynı mantık, sadece programın
+// içinden, sunucuya elle erişmeden yapılabiliyor.
+const recoveryLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Çok fazla deneme. 1 saat sonra tekrar dene.' }
+});
+
+router.post('/recover-password', recoveryLimiter, async (req, res) => {
+  const { recoveryPassword, newPassword } = req.body || {};
+  const recoveryHash = process.env.RECOVERY_PASSWORD_HASH;
+  if (!recoveryHash) {
+    return res.status(500).json({ error: 'Sunucuda kurtarma şifresi ayarlı değil. Yöneticiye ulaşın.' });
+  }
+  if (!recoveryPassword || typeof recoveryPassword !== 'string') {
+    return res.status(400).json({ error: 'Kurtarma şifresi gerekli.' });
+  }
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+    return res.status(400).json({ error: 'Yeni şifre en az 8 karakter olmalı.' });
+  }
+
+  const ok = await bcrypt.compare(recoveryPassword, recoveryHash);
+  if (!ok) {
+    return res.status(401).json({ error: 'Kurtarma şifresi yanlış.' });
+  }
+
+  const newHash = await bcrypt.hash(newPassword, 12);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO app_password (id, hash, updated_at) VALUES (TRUE, $1, now())
+       ON CONFLICT (id) DO UPDATE SET hash = EXCLUDED.hash, updated_at = now()`,
+      [newHash]
+    );
+    const revokedResult = await client.query('DELETE FROM api_tokens');
+    await client.query('COMMIT');
+    res.json({ ok: true, revokedDevices: revokedResult.rowCount });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Şifre sıfırlanamadı, tekrar dener misin?' });
+  } finally {
+    client.release();
+  }
+});
+
 // ---- Cihaz (masaüstü) token yönetimi ----
 // Ortak şifreyi değiştirmek MEVCUT masaüstü token'larını iptal ETMEZ —
 // token bağımsız bir kimlik bilgisidir. Bir bilgisayar kaybolduğunda/
