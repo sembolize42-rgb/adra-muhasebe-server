@@ -40,6 +40,7 @@ let expandedCustomer = null;
 let editingTxId = null;
 let editingCariId = null;
 let editingChargeId = null;
+let editingCardId = null;
 let recordingMaasId = null;
 let editingMaasId = null;
 let editingTransferId = null;
@@ -695,13 +696,24 @@ function viewKredi(){
     const isOpen = expandedCard===k.id;
     return `
     <div class="proj-card">
+      ${k.id===editingCardId ? `
+      <div class="proj-head" style="align-items:flex-start;">
+        <div class="field grow"><label>Kart Adı</label><input type="text" class="ek-name" value="${esc(k.name)}"></div>
+        <div style="white-space:nowrap;padding-top:20px;">
+          <button class="btn small" data-save-card="${k.id}">Kaydet</button>
+          <button class="btn small ghost" data-cancel-card="${k.id}">İptal</button>
+        </div>
+      </div>
+      ` : `
       <div class="proj-head" data-toggle-card="${k.id}">
         <div><span class="name">${esc(k.name)}</span></div>
         <div style="text-align:right">
           <div class="num" style="font-weight:700;${borc>0?'color:var(--red);':''}">${fmt(borc)} ₺ ödenmemiş</div>
-          <button class="del" data-del-card="${k.id}" title="Kartı sil">✕</button>
+          <button class="editbtn" data-edit-card="${k.id}" title="Yeniden adlandır">✎</button>
+          <button class="del" data-del-card="${k.id}" title="${borc>0.005?'Silmek için önce ödenmemiş borcu sıfırlaman gerekiyor':'Kartı sil'}">✕</button>
         </div>
       </div>
+      `}
       ${isOpen ? `
       <div class="proj-body">
         <form class="row-form" data-form="sarj" data-card-id="${k.id}" style="margin-bottom:14px;">
@@ -1579,10 +1591,31 @@ function attachHandlers(){
     render();
   });
 
+  document.querySelectorAll('[data-edit-card]').forEach(b=>b.onclick=(e)=>{
+    e.stopPropagation();
+    editingCardId = b.dataset.editCard;
+    render();
+  });
+  document.querySelectorAll('[data-cancel-card]').forEach(b=>b.onclick=()=>{ editingCardId = null; render(); });
+  document.querySelectorAll('[data-save-card]').forEach(b=>b.onclick=async()=>{
+    const id = b.dataset.saveCard;
+    const row = b.closest('.proj-head');
+    const name = row.querySelector('.ek-name').value.trim();
+    if(!name){ alert('Kart adı boş olamaz.'); return; }
+    const card = state.cards.find(x=>x.id===id);
+    if(card) card.name = name;
+    editingCardId = null;
+    await saveData(); render();
+  });
   document.querySelectorAll('[data-del-card]').forEach(b=>b.onclick=async(e)=>{
     e.stopPropagation();
-    if(!confirm('Bu kartı ve tüm harcama kayıtlarını silmek istediğine emin misin? (Ödenmiş harcamaların kasa hareketi silinmez)')) return;
     const id = b.dataset.delCard;
+    const borc = state.cardCharges.filter(c=>c.cardId===id && c.status==='odenmedi').reduce((s,c)=>s+Number(c.amount),0);
+    if(borc > 0.005){
+      alert('Bu kartın ödenmemiş borcu sıfır değil ('+fmt(borc)+' ₺). Silebilmek için önce harcamaları ödemen (kasadan düşmen) veya silmen gerekiyor.');
+      return;
+    }
+    if(!confirm('Bu kartı ve tüm harcama kayıtlarını silmek istediğine emin misin? (Ödenmiş harcamaların kasa hareketi silinmez)')) return;
     state.cards = state.cards.filter(x=>x.id!==id);
     state.cardCharges = state.cardCharges.filter(x=>x.cardId!==id);
     await saveData(); render();
@@ -1618,7 +1651,7 @@ function attachHandlers(){
     await saveData(); render();
   });
   document.querySelectorAll('[data-toggle-card]').forEach(el=>el.onclick=(e)=>{
-    if(e.target.closest('[data-del-card]')) return;
+    if(e.target.closest('[data-del-card]') || e.target.closest('[data-edit-card]')) return;
     const id = el.dataset.toggleCard;
     expandedCard = expandedCard===id ? null : id;
     render();
@@ -1818,13 +1851,28 @@ function setupBackupControls(){
 // girilmesi gerekir. Çıkışın gerçek mekaniği (sunucu session'ını/token'ı
 // iptal etmek) ortama göre değiştiği için, her ortam (web/masaüstü) kendi
 // mantığını window.onIdleLogout olarak tanımlar — burası sadece süreyi izler.
+//
+// setTimeout'a tek başına güvenilmiyor: mobil tarayıcılar (ve masaüstü işletim
+// sistemleri) arka plana alınan/kilitlenen sekmelerde JS zamanlayıcılarını
+// durdurur veya yavaşlatır. Telefon kilitlenip 10 dakika sonra tekrar
+// açıldığında setTimeout hiç ateşlenmeden sayfa "canlanabiliyor" — bu da
+// şifre sorulmadan kaldığı yerden devam edilmesine yol açıyordu. Bunun için
+// gerçek geçen süreyi (Date.now() farkı) sayfa her görünür/aktif olduğunda
+// (visibilitychange, focus, pageshow — sekme değişimi, uygulamaya dönme,
+// bfcache'ten geri gelme) ayrıca kontrol ediyoruz; süre dolmuşsa setTimeout
+// beklemeden hemen çıkış yapılır.
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 let idleTimer = null;
-function armIdleTimer(){
+let lastActivityAt = Date.now();
+function isAppVisible(){
+  const appRoot = document.getElementById('appRoot');
+  return !!(appRoot && !appRoot.classList.contains('hidden'));
+}
+function armIdleTimer(remainingMs){
   if(idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(()=>{
     if(typeof window.onIdleLogout === 'function') window.onIdleLogout();
-  }, IDLE_TIMEOUT_MS);
+  }, remainingMs==null ? IDLE_TIMEOUT_MS : remainingMs);
 }
 function clearIdleTimer(){
   if(idleTimer){ clearTimeout(idleTimer); idleTimer = null; }
@@ -1833,12 +1881,28 @@ function handleUserActivity(){
   // Sadece uygulama görünürken (login ekranında değilken) izle — aksi
   // halde login ekranında bekleyen biri de "boşta" sayılıp anlamsız yere
   // tetiklenmiş olur.
-  const appRoot = document.getElementById('appRoot');
-  if(appRoot && !appRoot.classList.contains('hidden')) armIdleTimer();
+  if(!isAppVisible()) return;
+  lastActivityAt = Date.now();
+  armIdleTimer();
+}
+// Sekme/uygulama tekrar öne geldiğinde gerçek geçen süreyi kontrol et —
+// arka planda duraklamış olabilecek setTimeout'a güvenmeden.
+function checkIdleOnResume(){
+  if(!isAppVisible()) return;
+  const elapsed = Date.now() - lastActivityAt;
+  if(elapsed >= IDLE_TIMEOUT_MS){
+    clearIdleTimer();
+    if(typeof window.onIdleLogout === 'function') window.onIdleLogout();
+  } else {
+    armIdleTimer(IDLE_TIMEOUT_MS - elapsed);
+  }
 }
 ['mousemove','mousedown','keydown','wheel','touchstart','click'].forEach(evt=>{
   document.addEventListener(evt, handleUserActivity, {passive:true});
 });
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') checkIdleOnResume(); });
+window.addEventListener('focus', checkIdleOnResume);
+window.addEventListener('pageshow', checkIdleOnResume);
 
 function showLoginScreen(errorMsg){
   clearIdleTimer();
@@ -1853,6 +1917,7 @@ function showLoginScreen(errorMsg){
 function showApp(){
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appRoot').classList.remove('hidden');
+  lastActivityAt = Date.now();
   armIdleTimer();
 }
 
